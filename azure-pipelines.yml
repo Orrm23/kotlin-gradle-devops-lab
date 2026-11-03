@@ -1,6 +1,4 @@
 
-# Kotlin Gradle CI Pipeline
-
 trigger:
   branches:
     include:
@@ -13,28 +11,23 @@ variables:
   GRADLE_USER_HOME: $(Pipeline.Workspace)/.gradle
 
 steps:
-  # 1. Checkout source code
   - checkout: self
 
-  # 2. Make Gradle wrapper executable on Linux
   - bash: |
       chmod +x ./gradlew
     displayName: 'Set Gradle Wrapper permissions'
 
-  # 3. Build application and execute unit tests
   - task: Gradle@3
     displayName: 'Gradle Clean Build and Test'
     inputs:
       gradleWrapperFile: 'gradlew'
       tasks: 'clean build'
-      options: '-Xmx3072m'
       publishJUnitResults: true
       testResultsFiles: '**/TEST-*.xml'
       javaHomeOption: 'JDKVersion'
       jdkVersionOption: '1.21'
       jdkArchitectureOption: 'x64'
 
-  # 4. Publish generated JAR
   - task: PublishPipelineArtifact@1
     displayName: 'Publish Kotlin Application Artifact'
     inputs:
