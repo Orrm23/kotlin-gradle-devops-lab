@@ -1,5 +1,14 @@
 
+# ==========================================================
+# Kotlin Gradle - Multi-Stage CI Pipeline
+# ==========================================================
+
 trigger:
+  branches:
+    include:
+      - main
+
+pr:
   branches:
     include:
       - main
@@ -10,27 +19,114 @@ pool:
 variables:
   GRADLE_USER_HOME: $(Pipeline.Workspace)/.gradle
 
-steps:
-  - checkout: self
+# ==========================================================
+# STAGE 1 - BUILD
+# ==========================================================
 
-  - bash: |
-      chmod +x ./gradlew
-    displayName: 'Set Gradle Wrapper permissions'
+stages:
+  - stage: Build
+    displayName: '01 - Build Application'
+    jobs:
+      - job: BuildJob
+        displayName: 'Gradle Build Job'
+        timeoutInMinutes: 20
 
-  - task: Gradle@3
-    displayName: 'Gradle Clean Build and Test'
-    inputs:
-      gradleWrapperFile: 'gradlew'
-      tasks: 'clean build'
-      publishJUnitResults: true
-      testResultsFiles: '**/TEST-*.xml'
-      javaHomeOption: 'JDKVersion'
-      jdkVersionOption: '1.21'
-      jdkArchitectureOption: 'x64'
+        steps:
+          - checkout: self
+            clean: true
 
-  - task: PublishPipelineArtifact@1
-    displayName: 'Publish Kotlin Application Artifact'
-    inputs:
-      targetPath: '$(Build.SourcesDirectory)/app/build/libs'
-      artifact: 'kotlin-app'
-      publishLocation: 'pipeline'
+          - bash: |
+              chmod +x ./gradlew
+            displayName: 'Set Gradle Wrapper Permissions'
+
+          - task: Gradle@3
+            displayName: 'Compile and Assemble Application'
+            inputs:
+              gradleWrapperFile: 'gradlew'
+              tasks: 'clean assemble'
+              javaHomeOption: 'JDKVersion'
+              jdkVersionOption: '1.21'
+              jdkArchitectureOption: 'x64'
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish Build Artifact'
+            inputs:
+              targetPath: '$(Build.SourcesDirectory)/app/build/libs'
+              artifact: 'kotlin-build'
+              publishLocation: 'pipeline'
+
+  # ========================================================
+  # STAGE 2 - TEST
+  # ========================================================
+
+  - stage: Test
+    displayName: '02 - Test Application'
+    dependsOn: []
+    jobs:
+      - job: TestJob
+        displayName: 'Gradle Unit Test Job'
+        timeoutInMinutes: 20
+
+        steps:
+          - checkout: self
+            clean: true
+
+          - bash: |
+              chmod +x ./gradlew
+            displayName: 'Set Gradle Wrapper Permissions'
+
+          - task: Gradle@3
+            displayName: 'Execute Unit Tests'
+            inputs:
+              gradleWrapperFile: 'gradlew'
+              tasks: 'test'
+              publishJUnitResults: true
+              testResultsFiles: '**/TEST-*.xml'
+              testRunTitle: 'Kotlin Gradle Unit Tests'
+              javaHomeOption: 'JDKVersion'
+              jdkVersionOption: '1.21'
+              jdkArchitectureOption: 'x64'
+
+  # ========================================================
+  # STAGE 3 - PUBLISH
+  # ========================================================
+
+  - stage: Publish
+    displayName: '03 - Publish Release Artifact'
+    dependsOn:
+      - Build
+      - Test
+    condition: succeeded()
+
+    jobs:
+      - job: PublishJob
+        displayName: 'Release Artifact Job'
+        timeoutInMinutes: 10
+
+        steps:
+          - task: DownloadPipelineArtifact@2
+            displayName: 'Download Validated Build Artifact'
+            inputs:
+              buildType: 'current'
+              artifactName: 'kotlin-build'
+              targetPath: '$(Pipeline.Workspace)/kotlin-build'
+
+          - bash: |
+              echo "Validating generated JAR..."
+
+              JAR_FILE=$(find "$(Pipeline.Workspace)/kotlin-build" -type f -name "*.jar" -print -quit)
+
+              if [ -z "$JAR_FILE" ]; then
+                echo "ERROR: JAR file not found!"
+                exit 1
+              fi
+
+              echo "Release package found: $JAR_FILE"
+            displayName: 'Validate Release Package'
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish Final Release Artifact'
+            inputs:
+              targetPath: '$(Pipeline.Workspace)/kotlin-build'
+              artifact: 'kotlin-release'
+              publishLocation: 'pipeline'
